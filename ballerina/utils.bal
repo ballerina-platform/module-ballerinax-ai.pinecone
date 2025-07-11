@@ -15,39 +15,41 @@
 // under the License.
 
 import ballerina/ai;
+import ballerina/uuid;
+import ballerinax/pinecone.vector;
 
 # Converts standard comparison operators to Pinecone filter operators
 #
 # + operator - The standard operator to convert (!=, ==, >, <, >=, <=, in, nin)
 # + return - The corresponding Pinecone operator string or an error if unsupported
-isolated function convertPineconeOperator(ai:MetadataFilterOperator operator) returns string|ai:Error {
+isolated function mapPineconeOperator(ai:MetadataFilterOperator operator) returns string|ai:Error {
     match operator {
         ai:NOT_EQUAL => {
-            return "$ne"; // Not equal
+            return "$ne"; 
         }
         ai:EQUAL => {
-            return "$eq"; // Equal
+            return "$eq"; 
         }
         ai:GREATER_THAN => {
-            return "$gt"; // Greater than
+            return "$gt"; 
         }
         ai:LESS_THAN => {
-            return "$lt"; // Less than
+            return "$lt"; 
         }
         ai:GREATER_THAN_OR_EQUAL => {
-            return "$gte"; // Greater than or equal
+            return "$gte"; 
         }
         ai:LESS_THAN_OR_EQUAL => {
-            return "$lte"; // Less than or equal
+            return "$lte"; 
         }
         ai:IN => {
-            return "$in"; // Value exists in array
+            return "$in"; 
         }
         ai:NOT_IN => {
-            return "$nin"; // Value does not exist in array
+            return "$nin"; 
         }
         _ => {
-            return error ai:Error(string `Unsupported filter operator: ${operator}`);
+            return error(string `Unsupported filter operator: ${operator}`);
         }
     }
 }
@@ -56,16 +58,16 @@ isolated function convertPineconeOperator(ai:MetadataFilterOperator operator) re
 #
 # + condition - The logical condition to convert (and, or)
 # + return - The corresponding Pinecone condition string or an error if unsupported
-isolated function convertPineconeCondition(ai:MetadataFilterCondition condition) returns string|ai:Error {
+isolated function mapPineconeCondition(ai:MetadataFilterCondition condition) returns string|ai:Error {
     match condition {
         ai:AND => {
-            return "$and"; // Logical AND operation
+            return "$and"; 
         }
         ai:OR => {
-            return "$or"; // Logical OR operation
+            return "$or"; 
         }
         _ => {
-            return error ai:Error(string `Unsupported filter condition: ${condition}`);
+            return error(string `Unsupported filter condition: ${condition}`);
         }
     }
 }
@@ -77,7 +79,7 @@ isolated function convertPineconeCondition(ai:MetadataFilterCondition condition)
 isolated function convertPineconeFilters(ai:MetadataFilters filters) returns map<anydata>|ai:Error {
     (ai:MetadataFilters|ai:MetadataFilter)[]? rawFilters = filters.filters;
 
-    if rawFilters is () || rawFilters.length() == 0 {
+    if rawFilters == () || rawFilters.length() == 0 {
         return {};
     }
 
@@ -87,21 +89,22 @@ isolated function convertPineconeFilters(ai:MetadataFilters filters) returns map
         if filter is ai:MetadataFilter {
             map<anydata> filterMap = {};
 
-            if filter.operator != ai:EQUAL {
-                string pineconeOp = check convertPineconeOperator(filter.operator);
-                map<anydata> operatorMap = {};
-                operatorMap[pineconeOp] = filter.value;
-                filterMap[filter.key] = operatorMap;
-            } else {
+            if filter.operator == ai:EQUAL {
                 filterMap[filter.key] = filter.value;
+                filterList.push(filterMap);
+                continue;
             }
 
+            string pineconeOp = check mapPineconeOperator(filter.operator);
+            map<anydata> operatorMap = { [pineconeOp]: filter.value };
+            filterMap[filter.key] = operatorMap;
             filterList.push(filterMap);
-        } else {
-            map<anydata> nestedFilter = check convertPineconeFilters(filter);
-            if nestedFilter.length() > 0 {
-                filterList.push(nestedFilter);
-            }
+            continue;
+        }
+
+        map<anydata> nestedFilter = check convertPineconeFilters(filter);
+        if nestedFilter.length() > 0 {
+            filterList.push(nestedFilter);
         }
     }
 
@@ -111,9 +114,8 @@ isolated function convertPineconeFilters(ai:MetadataFilters filters) returns map
     if filterList.length() == 1 {
         return filterList[0];
     } 
-    string pineconeCondition = check convertPineconeCondition(filters.condition);
-    map<anydata> result = {};
-    result[pineconeCondition] = filterList;
+    string pineconeCondition = check mapPineconeCondition(filters.condition);
+    map<anydata> result = {[pineconeCondition]: filterList};
     return result;
 }
 
@@ -136,3 +138,56 @@ isolated function getContent(map<anydata>? metadata) returns string {
     } 
     return "Content field is not a string: " + content.toString();
 }
+
+# Converts a VectorEntry to a Vector based on the specified query mode.
+#
+# + entry - The VectorEntry to convert
+# + queryMode - The query mode to determine how to convert the entry
+# 
+# + return - A Vector object containing the ID, values, sparseValues, and metadata
+# or an error if the conversion fails
+isolated function mapEntryToVector(ai:VectorEntry entry, ai:VectorStoreQueryMode queryMode) returns vector:Vector|ai:Error {
+    map<anydata> metadata = entry.chunk?.metadata ?: {};
+    metadata["content"] = entry.chunk.content;
+    ai:Embedding embedding = entry.embedding;
+
+    if entry.id is () {
+        entry.id = uuid:createRandomUuid();
+    }
+
+    if queryMode == ai:DENSE {
+        if embedding is ai:Vector {
+            return {
+                id: entry.id,
+                values: embedding,
+                metadata
+            };
+        }
+        return error("Dense mode requires DenseVector embedding.");
+    } 
+    if queryMode == ai:SPARSE {
+        if embedding is ai:SparseVector {
+            return {
+                id: entry.id,
+                sparseValues: embedding,
+                metadata
+            };
+        }
+        return error ("Sparse mode requires SparseVector embedding.");
+    } 
+    if queryMode == ai:HYBRID {
+        if embedding is ai:HybridVector {
+            if embedding.dense.length() == 0 && embedding.sparse.indices.length() == 0 {
+                return error("Hybrid mode requires both dense and sparse vectors, but one or both are missing.");
+            }
+            return {
+                id: entry.id,
+                values: embedding.dense,
+                sparseValues: embedding.sparse,
+                metadata
+            };
+        }
+        return error("Hybrid mode requires DenseVector and SparseVector embedding.");
+    } 
+}
+
