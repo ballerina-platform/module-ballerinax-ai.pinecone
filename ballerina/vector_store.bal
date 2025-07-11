@@ -16,7 +16,6 @@
 
 import ballerina/ai;
 import ballerina/log;
-import ballerina/uuid;
 import ballerinax/pinecone.vector;
 
 # Pinecone Vector Store implementation with support for Dense, Sparse, and Hybrid vector search modes.
@@ -51,21 +50,21 @@ public isolated class VectorStore {
     public isolated function init(@display {label: "Service URL"} string serviceUrl, 
             @display {label: "API Key"} string apiKey, 
             @display {label: "Query Mode"} ai:VectorStoreQueryMode queryMode = ai:DENSE,
-            @display {label: "Pinecone Configuration"} PineconeConfigs conf = {}, 
+            @display {label: "Pinecone Configuration"} Configuration config = {}, 
             @display {label: "HTTP Configuration"} vector:ConnectionConfig httpConfig = {}) returns ai:Error? {
 
-        vector:ApiKeysConfig apiKeyConfig = {apiKey: apiKey};
+        vector:ApiKeysConfig apiKeyConfig = {apiKey};
 
         vector:Client|error pineconeIndexClient = new (apiKeyConfig, serviceUrl, httpConfig);
         if pineconeIndexClient is error {
-            return error ai:Error("Failed to initialize pinecone vector store", pineconeIndexClient);
+            return error("Failed to initialize pinecone vector store", pineconeIndexClient);
         }
 
         self.pineconeClient = pineconeIndexClient;
         self.queryMode = queryMode;
-        self.namespace = conf?.namespace ?: "";
-        self.filters = conf.filters.clone() ?: {filters: []};
-        self.similarityTopK = conf.similarityTopK;
+        self.namespace = config?.namespace ?: "";
+        self.filters = config.filters.clone() ?: {filters: []};
+        self.similarityTopK = config.topK;
     }
 
     # Adds the given vector entries to the Pinecone vector store.
@@ -79,54 +78,7 @@ public isolated class VectorStore {
 
         vector:Vector[] vectors = [];
         foreach ai:VectorEntry entry in entries {
-            map<anydata> metadata = entry.chunk?.metadata ?: {};
-            metadata["content"] = entry.chunk.content;
-            ai:Embedding embedding = entry.embedding;
-
-            vector:Vector vec;
-            if entry.id is () {
-                entry.id = uuid:createRandomUuid();
-            }
-
-            if self.queryMode == ai:DENSE {
-                if embedding is ai:Vector {
-                    vec = {
-                        id: entry.id,
-                        values: embedding,
-                        metadata
-                    };
-                } else {
-                    return error ai:Error("Dense mode requires DenseVector embedding.");
-                }
-            } else if self.queryMode == ai:SPARSE {
-                if embedding is ai:SparseVector {
-                    vec = {
-                        id: entry.id,
-                        sparseValues: embedding,
-                        metadata
-                    };
-                } else {
-                    return error ai:Error("Sparse mode requires SparseVector embedding.");
-                }
-            } else if self.queryMode == ai:HYBRID {
-                if embedding is ai:HybridVector {
-                    if embedding.dense.length() == 0 && embedding.sparse.indices.length() == 0 {
-                        return error ai:Error("Hybrid mode requires both dense and sparse vectors, " +
-                        "but one or both are missing.");
-                    }
-                    vec = {
-                        id: entry.id,
-                        values: embedding.dense,
-                        sparseValues: embedding.sparse,
-                        metadata
-                    };
-                } else {
-                    return error ai:Error("Hybrid mode requires DenseVector and SparseVector embedding.");
-                }
-            } else {
-                return error ai:Error("Unsupported query mode.");
-            }
-
+            vector:Vector vec = check mapEntryToVector(entry, self.queryMode);
             vectors.push(vec);
         }
 
@@ -141,7 +93,7 @@ public isolated class VectorStore {
         vector:UpsertResponse|error response = self.pineconeClient->/vectors/upsert.post(request);
         if response is error {
             log:printError("Failed to add vector entry", response);
-            return error ai:Error("Failed to add vector entry", response);
+            return error("Failed to add vector entry", response);
         }
     }
 
@@ -161,19 +113,19 @@ public isolated class VectorStore {
 
         if embedding is ai:Vector {
             if self.queryMode == ai:HYBRID {
-                return error ai:Error("Hybrid search requires both dense and sparse vectors, " +
+                return error("Hybrid search requires both dense and sparse vectors, " +
                 "but only dense vector provided.");
             }
             request.vector = embedding;
         } else if embedding is ai:SparseVector {
             if self.queryMode == ai:HYBRID {
-                return error ai:Error("Hybrid search requires both dense and sparse vectors, " +
+                return error("Hybrid search requires both dense and sparse vectors, " +
                 "but only sparse vector provided.");
             }
             request.sparseVector = embedding;
         } else {
             if self.queryMode != ai:HYBRID {
-                return error ai:Error("Hybrid embedding provided, but query mode is not set to HYBRID.");
+                return error("Hybrid embedding provided, but query mode is not set to HYBRID.");
             }
             request.vector = embedding.dense;
             request.sparseVector = embedding.sparse;
@@ -189,7 +141,7 @@ public isolated class VectorStore {
 
         vector:QueryResponse|error response = self.pineconeClient->/query.post(request);
         if response is error {
-            return error ai:Error("Failed to obtain matching vectors", response);
+            return error("Failed to obtain matching vectors", response);
         }
 
         vector:QueryMatch[]? matches = response?.matches;
@@ -219,8 +171,7 @@ public isolated class VectorStore {
             return;
         }
         ai:Metadata chunkMetadata = {};
-        foreach string key in metadata.keys() {
-            anydata value = metadata[key];
+        foreach [string, anydata] [key, value] in metadata.entries() {
             if value is json {
                 chunkMetadata[key] = value;
             } else {
@@ -246,7 +197,7 @@ public isolated class VectorStore {
         vector:DeleteResponse|error response = self.pineconeClient->/vectors/delete.post(request);
         if response is error {
             log:printError("Failed to delete vectors", response);
-            return error ai:Error("Failed to delete vectors", response);
+            return error("Failed to delete vectors", response);
         }
     }
 }
