@@ -367,7 +367,7 @@ dependencies = [
 [[package]]
 org = "ballerinax"
 name = "ai.pinecone"
-version = "1.0.0-SNAPSHOT"
+version = "1.0.0"
 dependencies = [
 	{org = "ballerina", name = "ai"},
 	{org = "ballerina", name = "log"},
