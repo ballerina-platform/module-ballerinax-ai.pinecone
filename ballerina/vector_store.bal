@@ -36,7 +36,6 @@ public isolated class VectorStore {
     private final ai:VectorStoreQueryMode queryMode;
     private final string namespace;
     private final ai:MetadataFilters filters;
-    private final int similarityTopK;
 
     # Initializes the PineconeVectorStore with the given configuration.
     #
@@ -64,7 +63,6 @@ public isolated class VectorStore {
         self.queryMode = queryMode;
         self.namespace = config?.namespace ?: "";
         self.filters = config.filters.clone() ?: {filters: []};
-        self.similarityTopK = config.topK;
     }
 
     # Adds the given vector entries to the Pinecone vector store.
@@ -102,15 +100,56 @@ public isolated class VectorStore {
     # + queryVector - The embedding vector to query against. Should match the configured query mode
     # + return - A list of matching ai:VectorMatch values, or an ai:Error on failure
     public isolated function query(ai:VectorStoreQuery queryVector) returns ai:VectorMatch[]|ai:Error {
-        ai:Embedding embedding = queryVector.embedding;
+        ai:Embedding? embedding = queryVector.embedding;
         ai:MetadataFilters? filters = queryVector.filters;
 
         vector:QueryRequest request = {
-            topK: self.similarityTopK,
+            topK: queryVector.topK > -1 ? queryVector.topK : 10000,
             includeMetadata: true,
             includeValues: true
         };
 
+        if embedding is () && filters is () {
+            vector:QueryResponse|error response = self.pineconeClient->/query.post(request);
+            if response is error {
+                return error("Failed to obtain matching vectors", response);
+            }
+            vector:QueryMatch[]? matches = response?.matches;
+            if matches is () {
+                return [];
+            }
+            return from vector:QueryMatch item in matches
+                select {
+                    id: item.id,
+                    embedding: item?.values ?: [],
+                    chunk: <ai:TextChunk>{
+                        content: getContent(item?.metadata),
+                        metadata: self.createMetadata(item?.metadata)
+                    },
+                    similarityScore: item?.score ?: 0.0
+                };
+        }
+        if embedding is () && filters !is () {
+            request.filter = check convertPineconeFilters(filters);
+            vector:QueryResponse|error response = self.pineconeClient->/query.post(request);
+            if response is error {
+                return error("Failed to obtain matching vectors", response);
+            }
+            vector:QueryMatch[]? matches = response?.matches;
+            if matches is () {
+                return [];
+            }
+            return from vector:QueryMatch item in matches
+                select {
+                    id: item.id,
+                    embedding: item?.values ?: [],
+                    chunk: <ai:TextChunk>{
+                        content: getContent(item?.metadata),
+                        metadata: self.createMetadata(item?.metadata)
+                    },
+                    similarityScore: item?.score ?: 0.0
+                };
+        }
         if embedding is ai:Vector {
             if self.queryMode == ai:HYBRID {
                 return error("Hybrid search requires both dense and sparse vectors, " +
@@ -123,7 +162,7 @@ public isolated class VectorStore {
                 "but only sparse vector provided.");
             }
             request.sparseVector = embedding;
-        } else {
+        } else if embedding !is () {
             if self.queryMode != ai:HYBRID {
                 return error("Hybrid embedding provided, but query mode is not set to HYBRID.");
             }
@@ -183,21 +222,31 @@ public isolated class VectorStore {
 
     # Deletes vector entries from the store by their reference document ID.
     #
-    # + refDocId - The unique document ID used to identify and delete the corresponding vector entry.
-    # + return - An `ai:Error` if the deletion fails; otherwise, `()` is returned indicating success.
-    public isolated function delete(string refDocId) returns ai:Error? {
-        vector:DeleteRequest request = {
-            ids: [refDocId]
-        };
+    # + refDocIds - The unique document ID/IDs used to identify and delete the corresponding vector entries
+    # + return - An `ai:Error` if the deletion fails; otherwise, `()` is returned indicating success
+    public isolated function delete(string|string[] refDocIds) returns ai:Error? {
+        if refDocIds is string {
+            return self.deleteById(refDocIds);
+        }
+        foreach string id in refDocIds {
+            ai:Error? err = self.deleteById(id);
+            if err is ai:Error {
+                return err;
+            }
+        }
+    }
 
+    isolated function deleteById(string id) returns ai:Error? {
+        vector:DeleteRequest request = {};
         if self.namespace != "" {
             request.namespace = self.namespace;
         }
+        request.ids = [id];
 
         vector:DeleteResponse|error response = self.pineconeClient->/vectors/delete.post(request);
         if response is error {
-            log:printError("Failed to delete vectors", response);
-            return error("Failed to delete vectors", response);
+            log:printError("Failed to delete vector entry", response);
+            return error("Failed to delete vector entry", response);
         }
     }
 }
