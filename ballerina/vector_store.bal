@@ -109,46 +109,9 @@ public isolated class VectorStore {
             includeValues: true
         };
 
-        if embedding is () && filters is () {
-            vector:QueryResponse|error response = self.pineconeClient->/query.post(request);
-            if response is error {
-                return error("Failed to obtain matching vectors", response);
-            }
-            vector:QueryMatch[]? matches = response?.matches;
-            if matches is () {
-                return [];
-            }
-            return from vector:QueryMatch item in matches
-                select {
-                    id: item.id,
-                    embedding: item?.values ?: [],
-                    chunk: <ai:TextChunk>{
-                        content: getContent(item?.metadata),
-                        metadata: self.createMetadata(item?.metadata)
-                    },
-                    similarityScore: item?.score ?: 0.0
-                };
-        }
-        if embedding is () && filters !is () {
-            request.filter = check convertPineconeFilters(filters);
-            vector:QueryResponse|error response = self.pineconeClient->/query.post(request);
-            if response is error {
-                return error("Failed to obtain matching vectors", response);
-            }
-            vector:QueryMatch[]? matches = response?.matches;
-            if matches is () {
-                return [];
-            }
-            return from vector:QueryMatch item in matches
-                select {
-                    id: item.id,
-                    embedding: item?.values ?: [],
-                    chunk: <ai:TextChunk>{
-                        content: getContent(item?.metadata),
-                        metadata: self.createMetadata(item?.metadata)
-                    },
-                    similarityScore: item?.score ?: 0.0
-                };
+        if embedding is () {
+            // Pinecone does not support querying data without a vector or ids.
+            return error("Embedding is required for query.");
         }
         if embedding is ai:Vector {
             if self.queryMode == ai:HYBRID {
@@ -162,7 +125,7 @@ public isolated class VectorStore {
                 "but only sparse vector provided.");
             }
             request.sparseVector = embedding;
-        } else if embedding !is () {
+        } else {
             if self.queryMode != ai:HYBRID {
                 return error("Hybrid embedding provided, but query mode is not set to HYBRID.");
             }
