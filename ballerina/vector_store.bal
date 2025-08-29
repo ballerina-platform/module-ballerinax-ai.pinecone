@@ -102,7 +102,10 @@ public isolated class VectorStore {
     public isolated function query(ai:VectorStoreQuery queryVector) returns ai:VectorMatch[]|ai:Error {
         ai:Embedding? embedding = queryVector.embedding;
         ai:MetadataFilters? filters = queryVector.filters;
-
+        if queryVector.topK == 0 || queryVector.topK > 10000 {
+            return error(string `
+                Invalid value for topK: ${queryVector.topK}. The value must be between 1 and 10000.`);
+        }
         vector:QueryRequest request = {
             topK: queryVector.topK > -1 ? queryVector.topK : 10000,
             includeMetadata: true,
