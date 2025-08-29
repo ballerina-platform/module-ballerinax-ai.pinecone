@@ -225,24 +225,12 @@ public isolated class VectorStore {
     # + refDocIds - The unique document ID/IDs used to identify and delete the corresponding vector entries
     # + return - An `ai:Error` if the deletion fails; otherwise, `()` is returned indicating success
     public isolated function delete(string|string[] refDocIds) returns ai:Error? {
-        if refDocIds is string {
-            return self.deleteById(refDocIds);
-        }
-        foreach string id in refDocIds {
-            ai:Error? err = self.deleteById(id);
-            if err is ai:Error {
-                return err;
-            }
-        }
-    }
-
-    isolated function deleteById(string id) returns ai:Error? {
-        vector:DeleteRequest request = {};
+        vector:DeleteRequest request = {
+            ids: refDocIds is string[] ? refDocIds : [refDocIds]
+        };
         if self.namespace != "" {
             request.namespace = self.namespace;
         }
-        request.ids = [id];
-
         vector:DeleteResponse|error response = self.pineconeClient->/vectors/delete.post(request);
         if response is error {
             log:printError("Failed to delete vector entry", response);
