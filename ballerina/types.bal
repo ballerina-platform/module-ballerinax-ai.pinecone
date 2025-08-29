@@ -24,6 +24,4 @@ public type Configuration record {
     ai:MetadataFilters filters?;
     # Optional sparse vector for hybrid search operations
     ai:SparseVector sparseVector?;
-    # Number of top similar vectors to return in queries
-    int topK = 5;
 };
