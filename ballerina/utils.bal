@@ -15,6 +15,7 @@
 // under the License.
 
 import ballerina/ai;
+import ballerina/time;
 import ballerina/uuid;
 import ballerinax/pinecone.vector;
 
@@ -87,16 +88,20 @@ isolated function convertPineconeFilters(ai:MetadataFilters filters) returns map
 
     foreach (ai:MetadataFilters|ai:MetadataFilter) filter in rawFilters {
         if filter is ai:MetadataFilter {
-            map<anydata> filterMap = {};
+            anydata filterValue = filter.value;
+            if (filter.key == "createdAt" || filter.key == "modifiedAt") && filterValue is time:Utc {
+                filterValue = time:utcToString(filterValue);
+            }
 
+            map<anydata> filterMap = {};
             if filter.operator == ai:EQUAL {
-                filterMap[filter.key] = filter.value;
+                filterMap[filter.key] = filterValue;
                 filterList.push(filterMap);
                 continue;
             }
 
             string pineconeOp = check mapPineconeOperator(filter.operator);
-            map<anydata> operatorMap = { [pineconeOp]: filter.value };
+            map<anydata> operatorMap = { [pineconeOp]: filterValue };
             filterMap[filter.key] = operatorMap;
             filterList.push(filterMap);
             continue;
@@ -118,7 +123,6 @@ isolated function convertPineconeFilters(ai:MetadataFilters filters) returns map
     map<anydata> result = {[pineconeCondition]: filterList};
     return result;
 }
-
 
 # Extracts the content from the metadata
 #
@@ -143,11 +147,11 @@ isolated function getContent(map<anydata>? metadata) returns string {
 #
 # + entry - The VectorEntry to convert
 # + queryMode - The query mode to determine how to convert the entry
-# 
+#
 # + return - A Vector object containing the ID, values, sparseValues, and metadata
 # or an error if the conversion fails
 isolated function mapEntryToVector(ai:VectorEntry entry, ai:VectorStoreQueryMode queryMode) returns vector:Vector|ai:Error {
-    map<anydata> metadata = entry.chunk?.metadata ?: {};
+    map<anydata> metadata = transformMetadata(entry.chunk?.metadata);
     metadata["content"] = entry.chunk.content;
     ai:Embedding embedding = entry.embedding;
 
@@ -191,3 +195,35 @@ isolated function mapEntryToVector(ai:VectorEntry entry, ai:VectorStoreQueryMode
     } 
 }
 
+isolated function transformMetadata(ai:Metadata? metadata) returns map<anydata> {
+    if metadata is () {
+        return {};
+    }
+    map<anydata> properties = {};
+    foreach string item in metadata.keys() {
+        anydata metadataValue = metadata.get(item);
+        if metadataValue is time:Utc && (item == "createdAt" || item == "modifiedAt") {
+            properties[item] = time:utcToString(metadataValue);
+        } else {
+            properties[item] = metadataValue;
+        }
+    }
+    return properties;
+}
+
+isolated function createAiMetadata(vector:VectorMetadata? metadata) returns ai:Metadata?|error {
+    if metadata is () {
+        return;
+    }
+    ai:Metadata chunkMetadata = {};
+    foreach [string, anydata] [key, value] in metadata.entries() {
+        if (key == "createdAt" || key == "modifiedAt") && value is string {
+            chunkMetadata[key] = check time:utcFromString(value);
+        } else if key == "fileSize" {
+            chunkMetadata[key] = check value.cloneWithType(decimal);
+        } else if value is json {
+            chunkMetadata[key] = value;
+        }
+    }
+    return chunkMetadata;
+}

@@ -153,37 +153,21 @@ public isolated class VectorStore {
         if matches is () {
             return [];
         }
-
-        return from vector:QueryMatch item in matches
+        do {
+            return from vector:QueryMatch item in matches
             select {
                 id: item.id,
                 embedding: item?.values ?: [],
 
                 chunk: <ai:TextChunk>{
                     content: getContent(item?.metadata),
-                    metadata: self.createMetadata(item?.metadata)
+                    metadata: check createAiMetadata(item?.metadata)
                 },
                 similarityScore: item?.score ?: 0.0
             };
-    }
-
-    # Converts Pinecone vector metadata to AI metadata format.
-    #
-    # + metadata - The vector metadata from Pinecone response, can be null
-    # + return - Converted ai:Metadata object, or null if input metadata is null
-    private isolated function createMetadata(vector:VectorMetadata? metadata) returns ai:Metadata? {
-        if metadata is () {
-            return;
+        } on fail error e {
+            return error(string `Failed to convert result into 'ai:VectorMatch[]': ${e.message()}`, e);
         }
-        ai:Metadata chunkMetadata = {};
-        foreach [string, anydata] [key, value] in metadata.entries() {
-            if value is json {
-                chunkMetadata[key] = value;
-            } else {
-                chunkMetadata[key] = value.toJson();
-            }
-        }
-        return chunkMetadata;
     }
 
     # Deletes vector entries from the store by their reference document ID.
