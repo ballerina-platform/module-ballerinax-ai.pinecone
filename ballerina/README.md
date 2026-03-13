@@ -1,7 +1,15 @@
-# Ballerina Pinecone Vector Store Module
-
 ## Overview
-This module provides APIs for connecting with Pinecone vector database, enabling efficient vector storage, retrieval, and management for AI applications. It implements the Ballerina AI VectorStore interface and supports Dense, Sparse, and Hybrid vector search modes.
+
+Pinecone is a fully managed vector database that makes it easy to build high-performance vector search applications. The Pinecone connector provides an API to interact with Pinecone indexes, enabling efficient management and search of vector embeddings in the cloud.
+
+### Key Features
+
+- Fully managed vector database for high-performance search
+- Efficient management of indexes and namespaces
+- High-speed vector similarity search with metadata filtering
+- Reliable and scalable cloud-native infrastructure
+- Secure communication with API key authentication
+- GraalVM compatible for native image builds
 
 ## Prerequisites
 Before using this module in your Ballerina application, you must obtain the necessary configuration to engage with Pinecone:
