@@ -6,6 +6,7 @@ license = ["Apache-2.0"]
 name = "ai.pinecone"
 org = "ballerinax"
 repository = "https://github.com/ballerina-platform/module-ballerinax-ai.pinecone"
+icon = "icon.png"
 version = "@toml.version@"
 
 [platform.java21]
