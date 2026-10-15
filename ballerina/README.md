@@ -1,6 +1,6 @@
 ## Overview
 
-Pinecone is a fully managed vector database that makes it easy to build high-performance vector search applications. The Pinecone connector provides an API to interact with Pinecone indexes, enabling efficient management and search of vector embeddings in the cloud.
+The `ai.pinecone` module implements the [`ballerina/ai`](https://central.ballerina.io/ballerina/ai/latest) `VectorStore` interface, backed by the [Pinecone](https://www.pinecone.io/) managed vector database. Use it to store and similarity-search embeddings for retrieval-augmented generation (RAG) in Ballerina AI agents, with managed indexes, namespaces, and metadata filtering.
 
 ### Key Features
 
